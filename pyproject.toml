@@ -1,0 +1,10 @@
+[project]
+name = "dashboard"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "sqlmodel>=0.0.39",
+    "textual>=8.2.8",
+]
