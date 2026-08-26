@@ -1,11 +1,12 @@
 from datetime import datetime
 from textual.app import App, ComposeResult
 import textual.widgets as wd
-import subprocess
+import subprocess, tasks_manager
 from textual import work
 from rich.text import Text
-from textual.containers import Container
+from textual.containers import Container, Horizontal
 
+tasks = tasks_manager.TaskManager()
 command = ["curl", "-s", "v2.wttr.in/Golada?m0&lang=es"]
 
 def parse_weather(original):
@@ -45,6 +46,56 @@ def parse_precipitations(original):
     new.append("└────────────────────────────────────────────────────────────────────────┘")
 
     return '\n'.join(new)
+
+
+class Tasks(Container):
+    def __init__(self):
+        super().__init__()
+        self.load_tasks()
+
+    def load_tasks(self):
+        self.lines = tasks.read_tasks().split("\n")
+        self.tasks = []
+
+        for i, line in enumerate(self.lines):
+            if "- [ ]" in line:
+                self.tasks.append((line.replace("- [ ] ", ""), False, i))
+            elif "- [x]" in line:
+                self.tasks.append((line.replace("- [x] ", ""), True, i))
+
+    def compose(self) -> ComposeResult:
+        with Horizontal(classes="add-task-row"):
+            yield wd.Input(placeholder="New task...", id="new_task_input")
+            yield wd.Button("Add", id="add_task_button", variant="success")
+
+        for task,done,i in self.tasks:
+            with Horizontal():
+                yield wd.Checkbox(task, value=done, id=f"task_{i}")
+                yield wd.Button("Delete task", id=f"delete_{i}", variant="error")
+
+    def on_checkbox_changed(self, event: wd.Checkbox.Changed) -> None:
+        line = int(event.checkbox.id.replace("task_", ""))
+        if event.value == True:
+            self.lines[line] = self.lines[line].replace("- [ ]", "- [x]")
+        else:
+            self.lines[line] = self.lines[line].replace("- [x]", "- [ ]")
+        tasks.write_tasks("\n".join(self.lines))
+    async def on_button_pressed(self, event: wd.Button.Pressed):
+        if "delete_" in event.button.id:
+            line = int(event.button.id.replace("delete_", ""))
+            self.lines.pop(line)
+            tasks.write_tasks("\n".join(self.lines))
+            self.load_tasks()
+            await self.recompose()
+        elif event.button.id == "add_task_button":
+            input_widget = self.query_one("#new_task_input", wd.Input)
+            text = input_widget.value.strip()
+            if text:
+                self.lines.append(f"- [ ] {text}")
+                tasks.write_tasks("\n".join(self.lines))
+                input_widget.value = ""
+                self.load_tasks()
+                await self.recompose()
 
 class Weather(wd.Static):
     def on_mount(self) -> None:
@@ -123,6 +174,30 @@ class Dashboard(App):
             width: auto;
             height: auto;
         }
+
+        Tasks {
+            width: 100%;
+            height: auto;
+        }
+        
+        Tasks Horizontal {
+            height: auto;
+            padding_bottom: 1;
+        }
+        
+        .add-task-row {
+            height: 6;
+            margin-bottom: 1;
+        }
+        
+        .add-task-row Input {
+            width: 6fr;
+        }
+        
+        .add-task-row Button {
+            width: 2fr;
+        }
+        
             """
 
     BINDINGS = [("q", "quit", "Exit")]
@@ -135,6 +210,8 @@ class Dashboard(App):
                 yield WeatherContainer()
             with wd.TabPane("Precipitations"):
                 yield RainContainer()
+            with wd.TabPane("Tasks"):
+                yield Tasks()
         yield wd.Footer()
 
         #event.button.id
