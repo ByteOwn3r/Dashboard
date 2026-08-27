@@ -1,13 +1,38 @@
 from datetime import datetime
 from textual.app import App, ComposeResult
 import textual.widgets as wd
-import subprocess, tasks_manager
+import subprocess, tasks_manager, calendar
 from textual import work
 from rich.text import Text
 from textual.containers import Container, Horizontal
+from datetime import date
+from textual.coordinate import Coordinate
 
 tasks = tasks_manager.TaskManager()
-command = ["curl", "-s", "v2.wttr.in/Golada?m0&lang=es"]
+command = ["curl", "-s", "v2.wttr.in/?m0"]
+ascii_art = [
+    " _ \n| |\n|_|",
+    "   \n  |\n  |",
+    " _ \n _|\n|_ ",
+    " _ \n _|\n _|",
+    "   \n|_|\n  |",
+    " _ \n|_ \n _|",
+    " _ \n|_ \n|_|",
+    " _ \n  |\n  |",
+    " _ \n|_|\n|_|",
+    " _ \n|_|\n _|",
+]
+
+def render_number(number: int) -> str:
+    digits = [ascii_art[int(d)] for d in str(number)]
+    lines_per_digit = [d.strip("\n").split("\n") for d in digits]
+
+    result = []
+    for i in range(len(lines_per_digit[0])):
+        row = "".join(digit[i] for digit in lines_per_digit)
+        result.append(row)
+
+    return "\n".join(result)
 
 def parse_weather(original):
     lines = original.split('\n')
@@ -47,6 +72,35 @@ def parse_precipitations(original):
 
     return '\n'.join(new)
 
+class Calendar(Container):
+    def compose(self) -> ComposeResult:
+        yield wd.DataTable()
+
+    def on_mount(self) -> None:
+        table = self.query_one(wd.DataTable)
+        today = date.today()
+        self.weeks = calendar.monthcalendar(today.year, today.month)
+
+        table.add_columns("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
+        for column in table.columns.values():
+            column.width = 16
+
+        for week in self.weeks:
+            row = [render_number(day) if day != 0 else "" for day in week]
+            table.add_row(*row, height=4)
+
+        for row_idx, week in enumerate(self.weeks):
+            if today.day in week:
+                column_idx = week.index(today.day)
+                table.cursor_coordinate = Coordinate(row=row_idx, column=column_idx)
+                break
+
+    def on_data_table_cell_selected(self, event: wd.DataTable.CellSelected) -> None:
+        row_idx = event.coordinate.row
+        col_idx = event.coordinate.column
+        day = self.weeks[row_idx][col_idx]
+        if day != 0:
+            pass # In progress
 
 class Tasks(Container):
     def __init__(self):
@@ -198,6 +252,14 @@ class Dashboard(App):
             width: 2fr;
         }
         
+        DataTable {
+            width: auto;
+            height: auto;
+        }
+        
+        Calendar {
+            align: center middle;
+        }
             """
 
     BINDINGS = [("q", "quit", "Exit")]
@@ -212,9 +274,9 @@ class Dashboard(App):
                 yield RainContainer()
             with wd.TabPane("Tasks"):
                 yield Tasks()
+            with wd.TabPane("Calendar"):
+                yield Calendar()
         yield wd.Footer()
-
-        #event.button.id
 
 if __name__ == "__main__":
     app = Dashboard()
