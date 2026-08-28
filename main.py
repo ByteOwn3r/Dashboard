@@ -1,12 +1,12 @@
-from datetime import datetime
+import subprocess, tasks_manager, calendar, sys, json
 from textual.app import App, ComposeResult
 import textual.widgets as wd
-import subprocess, tasks_manager, calendar
 from textual import work
 from rich.text import Text
 from textual.containers import Container, Horizontal
-from datetime import date
+from datetime import date, datetime
 from textual.coordinate import Coordinate
+from textual.screen import ModalScreen
 
 tasks = tasks_manager.TaskManager()
 command = ["curl", "-s", "v2.wttr.in/?m0"]
@@ -22,6 +22,12 @@ ascii_art = [
     " _ \n|_|\n|_|",
     " _ \n|_|\n _|",
 ]
+
+def parse_date(json_raw: str, target_date: str) -> list[dict]:
+    data = json.loads(json_raw)
+    events = data.get("result", [])
+    return [e for e in events if e["start"].startswith(target_date)]
+
 
 def render_number(number: int) -> str:
     digits = [ascii_art[int(d)] for d in str(number)]
@@ -72,14 +78,42 @@ def parse_precipitations(original):
 
     return '\n'.join(new)
 
+class DetailDay(ModalScreen):
+    def __init__(self, day: int, month: int, year: int):
+        super().__init__()
+        self.day = day
+        target = f"{year}-{month:02d}-{day:02d}"
+        jsonRaw = subprocess.run("""./bin/calendar-helper events '{"days_ahead": 30}'""", capture_output=True, text=True, shell=True)
+        array = parse_date(jsonRaw.stdout, target)
+        if array:
+            self.details = [array[0]["summary"], array[0]["start"]]
+        else:
+            self.details = None
+    def compose(self) -> ComposeResult:
+        with Container(id="modal-box"):
+            if sys.platform == "darwin":
+                if self.details:
+                    yield wd.Label(f"Details of day {self.day}")
+                    yield wd.Label(f"Event {self.details[0]} starts at {datetime.strptime(self.details[1], '%Y-%m-%d %H:%M').strftime('%H:%M')}")
+                else:
+                    yield wd.Label(f"No events for day {self.day}")
+                yield wd.Button("Close", id="close")
+            else:
+                yield wd.Label(f"Function currently not available on {'Windows' if sys.platform == 'win32' else 'Linux'}")
+                yield wd.Button("Close", id="close")
+
+    def on_button_pressed(self, event: wd.Button.Pressed) -> None:
+        if event.button.id == "close":
+            self.app.pop_screen()
+
 class Calendar(Container):
     def compose(self) -> ComposeResult:
         yield wd.DataTable()
 
     def on_mount(self) -> None:
         table = self.query_one(wd.DataTable)
-        today = date.today()
-        self.weeks = calendar.monthcalendar(today.year, today.month)
+        self.today = date.today()
+        self.weeks = calendar.monthcalendar(self.today.year, self.today.month)
 
         table.add_columns("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
         for column in table.columns.values():
@@ -90,8 +124,8 @@ class Calendar(Container):
             table.add_row(*row, height=4)
 
         for row_idx, week in enumerate(self.weeks):
-            if today.day in week:
-                column_idx = week.index(today.day)
+            if self.today.day in week:
+                column_idx = week.index(self.today.day)
                 table.cursor_coordinate = Coordinate(row=row_idx, column=column_idx)
                 break
 
@@ -100,7 +134,7 @@ class Calendar(Container):
         col_idx = event.coordinate.column
         day = self.weeks[row_idx][col_idx]
         if day != 0:
-            pass # In progress
+            self.app.push_screen(DetailDay(day, self.today.month, self.today.year))
 
 class Tasks(Container):
     def __init__(self):
@@ -258,6 +292,23 @@ class Dashboard(App):
         }
         
         Calendar {
+            align: center middle;
+        }
+        
+        DetailDay {
+            align: center middle;
+        }
+        
+        DetailDay Label {
+            padding-bottom: 1;
+        }
+        
+        #modal-box {
+            width: 40;
+            height: auto;
+            border: thick $primary;
+            background: $surface;
+            padding: 1 2;
             align: center middle;
         }
             """
