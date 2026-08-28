@@ -1,60 +1,60 @@
 # Dashboard
 
-A lightweight Terminal User Interface (TUI) dashboard that provides real-time information directly in your console. It is designed to be a simple, elegant way to keep track of time and local weather without leaving the terminal.
+A lightweight Terminal User Interface (TUI) dashboard for your console. It provides a clean, unified view of your clock, local weather, a persistent todo list, and your system calendar.
 
-## Technologies
+## Requirements
+- Python 3.11+
+- uv (recommended)
 
-| Category | Technology |
-| :--- | :--- |
-| Language | Python >= 3.11 |
-| TUI Framework | Textual |
-| Styling | Rich |
-| Package Manager | uv |
+## Quick Start
 
-## Prerequisites
-
-- Python 3.11 or higher
-- [uv](https://github.com/astral-sh/uv)
-
-## Installation
-
-The project uses `uv` for fast and reliable dependency management.
+This project uses `uv` for fast dependency management.
 
 ```bash
 # Clone the repository
 git clone https://github.com/ByteOwn3r/Dashboard.git
 cd Dashboard
+
+# Install dependencies
 uv sync
-```
 
-## Usage
-
-To launch the dashboard, run:
-
-```bash
+# Run the app
 uv run main.py
 ```
 
-### Controls
-- **Tabbed Navigation**: Use the tabs to switch between the **Home** (Clock) and **Weather** views.
-- **Exit**: Press `q` to quit the application.
+## Features & Compatibility
+
+The dashboard is designed to be cross-platform, though some integrations depend on the OS:
+
+| Feature | macOS | Linux | Windows | Notes |
+| :--- | :---: | :---: | :---: | :--- |
+| Real-time Clock | ✓ | ✓ | ✓ | High-precision digital display. |
+| Weather & Rain | ✓ | ✓ | ✓ | Fetches live data from wttr.in. |
+| Task Manager | ✓ | ✓ | ✓ | Persistent .md list in user config. |
+| Monthly Calendar | ✓ | ✓ | ✓ | Visual grid of the current month. |
+| Calendar Events | ✓ | ✗ | ✗ | Integrated with native macOS calendar. |
+
+### Key Functionalities
+- **Task Management**: A simple, interactive todo list. Tasks are stored in a Markdown file (tasks.md) in your config folder (~/.config/Dashboard or AppData/Roaming), making them easy to edit outside the app.
+- **Calendar Integration**: On macOS, selecting a date in the calendar opens a modal with actual events fetched from the system calendar via a helper script.
+- **Live Weather**: Uses curl and wttr.in to display real-time weather and precipitation data directly in the TUI.
 
 ## Architecture
 
-The application is built using a component-based architecture provided by the Textual framework.
+The app is built with Textual, using a component-based approach:
 
 ```
-├── main.py              # Application logic and UI components
-├── pyproject.toml       # Project configuration and dependencies
-└── uv.lock              # Locked dependency versions
+├── bin/
+│   └── calendar-helper    # macOS system calendar bridge
+├── main.py                # UI layout, Widgets, and App logic
+├── tasks_manager.py       # OS-agnostic file handler for tasks.md
+├── pyproject.toml         # Project metadata & dependencies
+└── uv.lock                # Dependency lockfile
 ```
 
-### Component Breakdown
-- **DashboardApp**: The main application class that manages the layout and global bindings.
-- **Home**: A container that centers the real-time clock on the screen.
-- **Clock**: A specialized widget that updates every 0.1 seconds to provide high-precision time.
-- **Weather**: An asynchronous widget that fetches weather data via `curl` from `wttr.in` and parses the output for a clean terminal display.
-
-## Project State
-
-The project is currently in its initial version, providing core functionality for time and weather tracking.
+### Technical Breakdown
+- **Dashboard (App)**: Manages the TabbedContent layout and global bindings (like q to quit).
+- **Clock**: A specialized widget updating every 0.1s.
+- **Weather/Rain**: Asynchronous workers that parse ANSI output from external API calls.
+- **Tasks**: A state-synced container that reads/writes to the local filesystem in real-time.
+- **Calendar/DetailDay**: A data-table implementation that triggers OS-specific logic for event retrieval.
