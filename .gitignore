@@ -6,3 +6,5 @@ wheels/
 *.egg-info
 .venv
 .idea
+credentials.json
+token.json

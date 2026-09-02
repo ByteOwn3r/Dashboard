@@ -3,14 +3,14 @@ from textual.app import App, ComposeResult
 import textual.widgets as wd
 from textual import work
 from rich.text import Text
-from textual.containers import Container, Horizontal
+from textual.containers import Container, Horizontal, Vertical
 from datetime import date, datetime
 from textual.coordinate import Coordinate
 from textual.screen import ModalScreen
+from calendar_manager import manage_calendar
+from config_manager import ConfigManager
 
-tasks = tasks_manager.TaskManager()
-command = ["curl", "-s", "v2.wttr.in/?m0"]
-ascii_art = [
+numbers_ascii = [
     " _ \n| |\n|_|",
     "   \n  |\n  |",
     " _ \n _|\n|_ ",
@@ -23,6 +23,23 @@ ascii_art = [
     " _ \n|_|\n _|",
 ]
 
+def load_config():
+    global tasks,command,google,url,user,password
+
+    tasks = tasks_manager.TaskManager()
+    command = ["curl", "-s", "v2.wttr.in/Usansolo?m0"]
+    config_json = ConfigManager().read_config()
+    google = config_json["google"]
+    url = config_json["url"]
+    user = config_json["user"]
+    password = config_json["password"]
+    if config_json["city"] != "":
+        command = ["curl", "-s", f"v2.wttr.in/{config_json['city']}?m0"]
+    else:
+        command = ["curl", "-s", "v2.wttr.in/?m0"]
+
+load_config()
+
 def parse_date(json_raw: str, target_date: str) -> list[dict]:
     data = json.loads(json_raw)
     events = data.get("result", [])
@@ -30,7 +47,7 @@ def parse_date(json_raw: str, target_date: str) -> list[dict]:
 
 
 def render_number(number: int) -> str:
-    digits = [ascii_art[int(d)] for d in str(number)]
+    digits = [numbers_ascii[int(d)] for d in str(number)]
     lines_per_digit = [d.strip("\n").split("\n") for d in digits]
 
     result = []
@@ -78,7 +95,43 @@ def parse_precipitations(original):
 
     return '\n'.join(new)
 
-class DetailDay(ModalScreen):
+class Config(Container):
+    def compose(self) -> ComposeResult:
+        self.config_json = ConfigManager().read_config()
+        yield wd.Checkbox("Use Google Calendar", value=self.config_json["google"], id="google")
+        yield wd.Input(placeholder="Custom url for caldav (Optional)", id="url", value=self.config_json["url"])
+        yield wd.Input(placeholder="Username for caldav (Optional)", id="user", value=self.config_json["user"])
+        yield wd.Input(placeholder="Password for caldav (Optional)", id="password",value=self.config_json["password"])
+        yield wd.Input(placeholder="Custom city for weather (Optional)", id="city", value=self.config_json["city"])
+        yield wd.Button("Save Config", id="save_config", variant="success")
+
+    def on_checkbox_changed(self, event: wd.Checkbox.Changed) -> None:
+        self.config_json[event.checkbox.id] = event.checkbox.value
+
+    def on_button_pressed(self, event: wd.Button.Pressed) -> None:
+        if event.button.id == "save_config":
+            self.config_json["url"] = self.query_one("#url", wd.Input).value
+            self.config_json["user"] = self.query_one("#user", wd.Input).value
+            self.config_json["password"] = self.query_one("#password", wd.Input).value
+            self.config_json["city"] = self.query_one("#city", wd.Input).value
+
+            url_valid = self.config_json["url"] == "" or "https://" in self.config_json["url"]
+            user_valid = self.config_json["user"] == "" or "@" in self.config_json["user"]
+
+            if not url_valid:
+                self.notify("Url format not valid!", severity="error", title="Dashboard")
+            elif not user_valid:
+                self.notify("User format not valid!", severity="error", title="Dashboard")
+            else:
+                try:
+                    ConfigManager().write_config(self.config_json)
+                    load_config()
+                    self.notify("Config saved!", title="Dashboard")
+                except Exception:
+                    self.notify("An error occurred!", title="Dashboard", severity="error")
+
+
+class DetailDayMacOS(ModalScreen):
     def __init__(self, day: int, month: int, year: int):
         super().__init__()
         self.day = day
@@ -91,20 +144,45 @@ class DetailDay(ModalScreen):
             self.details = None
     def compose(self) -> ComposeResult:
         with Container(id="modal-box"):
-            if sys.platform == "darwin":
-                if self.details:
-                    yield wd.Label(f"Details of day {self.day}")
-                    yield wd.Label(f"Event {self.details[0]} starts at {datetime.strptime(self.details[1], '%Y-%m-%d %H:%M').strftime('%H:%M')}")
-                else:
-                    yield wd.Label(f"No events for day {self.day}")
-                yield wd.Button("Close", id="close")
+            if self.details:
+                yield wd.Label(f"Details of day {self.day}")
+                yield wd.Label(f"Event {self.details[0]} starts at {datetime.strptime(self.details[1], '%Y-%m-%d %H:%M').strftime('%H:%M')}")
             else:
-                yield wd.Label(f"Function currently not available on {'Windows' if sys.platform == 'win32' else 'Linux'}")
-                yield wd.Button("Close", id="close")
+                yield wd.Label(f"No events for day {self.day}")
+            yield wd.Button("Close", id="close")
 
     def on_button_pressed(self, event: wd.Button.Pressed) -> None:
         if event.button.id == "close":
             self.app.pop_screen()
+
+class DetailDayUniversal(ModalScreen):
+    def __init__(self, day: int, month: int, year: int):
+        super().__init__()
+        self.day = day
+        self.text = wd.Label("Loading...")
+        self.target = f"{year}-{month:02d}-{day:02d}"
+
+    def compose(self) -> ComposeResult:
+        with Container(id="modal-box"):
+            self.fetch_events()
+            yield wd.Label(f"Details of day {self.day}")
+            yield self.text
+            yield wd.Button("Close", id="close")
+
+    def on_button_pressed(self, event: wd.Button.Pressed) -> None:
+        if event.button.id == "close":
+            self.app.pop_screen()
+
+    @work(exclusive=True, thread=True)
+    def fetch_events(self):
+        array = manage_calendar(self.target, google, url, user, password)
+
+        if array:
+            self.text.update(f"Event {array[0]} at {array[1]}")
+        elif not array:
+            self.text.update(f"No events for {self.day}")
+        else:
+            self.text.update("Failed to fetch events")
 
 class Calendar(Container):
     def compose(self) -> ComposeResult:
@@ -134,7 +212,10 @@ class Calendar(Container):
         col_idx = event.coordinate.column
         day = self.weeks[row_idx][col_idx]
         if day != 0:
-            self.app.push_screen(DetailDay(day, self.today.month, self.today.year))
+            if sys.platform == "darwin" and not google:
+                self.app.push_screen(DetailDayMacOS(day, self.today.month, self.today.year))
+            elif sys.platform != "darwin" or google:
+                self.app.push_screen(DetailDayUniversal(day, self.today.month, self.today.year))
 
 class Tasks(Container):
     def __init__(self):
@@ -179,11 +260,16 @@ class Tasks(Container):
             input_widget = self.query_one("#new_task_input", wd.Input)
             text = input_widget.value.strip()
             if text:
-                self.lines.append(f"- [ ] {text}")
-                tasks.write_tasks("\n".join(self.lines))
-                input_widget.value = ""
-                self.load_tasks()
-                await self.recompose()
+                try:
+                    self.lines.append(f"- [ ] {text}")
+                    tasks.write_tasks("\n".join(self.lines))
+                    input_widget.value = ""
+                    self.load_tasks()
+                    await self.recompose()
+                except Exception:
+                    self.notify("An error occurred", title="Dashboard", severity="error")
+            else:
+                self.notify("Add some text!", title="Dashboard", severity="error")
 
 class Weather(wd.Static):
     def on_mount(self) -> None:
@@ -295,11 +381,19 @@ class Dashboard(App):
             align: center middle;
         }
         
-        DetailDay {
+        DetailDayMacOS {
             align: center middle;
         }
         
-        DetailDay Label {
+        DetailDayMacOS Label {
+            padding-bottom: 1;
+        }
+        
+        DetailDayUniversal {
+            align: center middle;
+        }
+        
+        DetailDayUniversal Label {
             padding-bottom: 1;
         }
         
@@ -327,6 +421,8 @@ class Dashboard(App):
                 yield Tasks()
             with wd.TabPane("Calendar"):
                 yield Calendar()
+            with wd.TabPane("Config"):
+                yield Config()
         yield wd.Footer()
 
 if __name__ == "__main__":
